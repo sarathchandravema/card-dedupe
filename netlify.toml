@@ -1,0 +1,7 @@
+[build]
+  command = "pip install -r requirements.txt && python build_static.py"
+  publish = "public"
+
+[build.environment]
+  # rapidfuzz>=3 needs Python 3.9+
+  PYTHON_VERSION = "3.12"

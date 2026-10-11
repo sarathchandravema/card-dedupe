@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Card customer de-duplication</title>
+  <style>
+    body { font-family: Segoe UI, Arial, sans-serif; margin: 2rem; color: #222; }
+    table { border-collapse: collapse; width: 100%; margin-bottom: .5rem; font-size: .9rem; }
+    th, td { border: 1px solid #ddd; padding: 4px 8px; text-align: left; }
+    th { background: #f3f3f3; }
+    .group { border: 1px solid #c9d6ea; border-radius: 6px; padding: 1rem; margin-bottom: 1rem; background: #f8fbff; overflow-x: auto; }
+    .tag { display: inline-block; background: #1a5fb4; color: #fff; border-radius: 3px; padding: 0 6px; margin-right: 4px; font-size: .8rem; }
+    .muted { color: #666; }
+    form { margin-bottom: 1.5rem; }
+    input { width: 5rem; }
+  </style>
+</head>
+<body>
+  <h1>Card customer de-duplication</h1>
+  <p class="muted" id="summary"></p>
+
+  <form id="controls">
+    Min matching fields <input type="number" id="min_matches" min="1" max="5">
+    Min weighted score <input type="number" id="min_score" step="0.5" min="0">
+    <button type="submit">Re-run</button>
+  </form>
+
+  <h2>Same customer, multiple ids</h2>
+  <div id="groups"></div>
+
+  <h2>All records</h2>
+  <div id="all-records"></div>
+
+  <script id="data" type="application/json">{{ data_json|safe }}</script>
+  <script>
+    const DATA = JSON.parse(document.getElementById("data").textContent);
+    const COLUMNS = [
+      ["id", "Id"], ["bank", "Bank"], ["name", "Name"], ["atm_used", "ATM used"],
+      ["mobile", "Mobile"], ["email", "Email"], ["ip_address", "IP"], ["channel", "Channel"],
+    ];
+
+    function el(tag, props, children) {
+      const node = document.createElement(tag);
+      Object.assign(node, props || {});
+      (children || []).forEach(c => node.append(c));
+      return node;
+    }
+
+    function recordsTable(records) {
+      const head = el("tr", {}, COLUMNS.map(([, label]) => el("th", { textContent: label })));
+      const rows = records.map(r =>
+        el("tr", {}, COLUMNS.map(([key]) => el("td", { textContent: r[key] }))));
+      return el("table", {}, [head, ...rows]);
+    }
+
+    // Same rule as dedupe.matcher.find_duplicates: pairs with enough matching fields
+    // and a high enough weighted score are merged transitively (union-find).
+    function findClusters(minMatches, minScore) {
+      const n = DATA.records.length;
+      const parent = Array.from({ length: n }, (_, i) => i);
+      const find = x => {
+        while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; }
+        return x;
+      };
+      const hits = DATA.pairs.filter(p => p.matched.length >= minMatches && p.score >= minScore);
+      hits.forEach(p => { parent[find(p.a)] = find(p.b); });
+
+      const members = new Map();
+      for (let i = 0; i < n; i++) {
+        const root = find(i);
+        if (!members.has(root)) members.set(root, []);
+        members.get(root).push(i);
+      }
+      const clusters = [];
+      members.forEach((idxs, root) => {
+        if (idxs.length < 2) return;
+        clusters.push({
+          records: idxs.map(i => DATA.records[i]),
+          evidence: hits.filter(p => find(p.a) === root),
+        });
+      });
+      clusters.sort((x, y) =>
+        (y.records.length - x.records.length) || (x.records[0].id < y.records[0].id ? -1 : 1));
+      return clusters;
+    }
+
+    function render(minMatches, minScore) {
+      const clusters = findClusters(minMatches, minScore);
+      const grouped = new Set();
+      clusters.forEach(c => c.records.forEach(r => grouped.add(r.id)));
+
+      document.getElementById("summary").textContent =
+        `${DATA.records.length} records \u00b7 ${clusters.length} customers with multiple ids \u00b7 ` +
+        `${DATA.records.length - grouped.size} records with no match`;
+
+      const groups = document.getElementById("groups");
+      groups.replaceChildren();
+      if (!clusters.length) groups.append(el("p", { textContent: "No duplicates found." }));
+      clusters.forEach((c, k) => {
+        const box = el("div", { className: "group" }, [
+          el("strong", { textContent: `Group ${k + 1}` }),
+          ` \u2013 ${c.records.length} ids`,
+          recordsTable(c.records),
+        ]);
+        c.evidence.forEach(e => {
+          const a = DATA.records[e.a].id.slice(-4), b = DATA.records[e.b].id.slice(-4);
+          const line = el("div", { className: "muted" }, [`\u2026${a} \u2194 \u2026${b}: `]);
+          e.matched.forEach(f => line.append(el("span", { className: "tag", textContent: f })));
+          line.append(` score ${e.score}`);
+          box.append(line);
+        });
+        groups.append(box);
+      });
+    }
+
+    const form = document.getElementById("controls");
+    const params = new URLSearchParams(location.search);
+    const num = (v, fallback) => (v === null || v === "" || isNaN(Number(v))) ? fallback : Number(v);
+    form.min_matches.value = num(params.get("min_matches"), DATA.defaults.min_matches);
+    form.min_score.value = num(params.get("min_score"), DATA.defaults.min_score);
+
+    function run() {
+      render(Math.max(1, num(form.min_matches.value, DATA.defaults.min_matches)),
+             num(form.min_score.value, DATA.defaults.min_score));
+    }
+    form.addEventListener("submit", ev => {
+      ev.preventDefault();
+      const q = new URLSearchParams({ min_matches: form.min_matches.value, min_score: form.min_score.value });
+      history.replaceState(null, "", "?" + q);  // keeps the settings shareable
+      run();
+    });
+
+    document.getElementById("all-records").append(recordsTable(DATA.records));
+    run();
+  </script>
+</body>
+</html>

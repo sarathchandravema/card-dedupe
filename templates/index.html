@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Card customer de-duplication</title>
+  <style>
+    body { font-family: Segoe UI, Arial, sans-serif; margin: 2rem; color: #222; }
+    table { border-collapse: collapse; width: 100%; margin-bottom: .5rem; font-size: .9rem; }
+    th, td { border: 1px solid #ddd; padding: 4px 8px; text-align: left; }
+    th { background: #f3f3f3; }
+    .group { border: 1px solid #c9d6ea; border-radius: 6px; padding: 1rem; margin-bottom: 1rem; background: #f8fbff; }
+    .tag { display: inline-block; background: #1a5fb4; color: #fff; border-radius: 3px; padding: 0 6px; margin-right: 4px; font-size: .8rem; }
+    .muted { color: #666; }
+    form { margin-bottom: 1.5rem; }
+    input { width: 5rem; }
+  </style>
+</head>
+<body>
+  <h1>Card customer de-duplication</h1>
+  <p class="muted">
+    {{ records|length }} records &middot; {{ clusters|length }} customers with multiple ids &middot;
+    {{ unique_count }} records with no match
+  </p>
+
+  <form method="get">
+    Min matching fields <input type="number" name="min_matches" min="1" max="5" value="{{ min_matches }}">
+    Min weighted score <input type="number" name="min_score" step="0.5" min="0" value="{{ min_score }}">
+    <button type="submit">Re-run</button>
+  </form>
+
+  <h2>Same customer, multiple ids</h2>
+  {% for c in clusters %}
+  <div class="group">
+    <strong>Group {{ loop.index }}</strong> &ndash; {{ c.records|length }} ids
+    <table>
+      <tr><th>Id</th><th>Bank</th><th>Name</th><th>ATM used</th><th>Mobile</th><th>Email</th><th>IP</th><th>Channel</th></tr>
+      {% for r in c.records %}
+      <tr>
+        <td>{{ r.id }}</td><td>{{ r.bank }}</td><td>{{ r.name }}</td><td>{{ r.atm_used }}</td>
+        <td>{{ r.mobile }}</td><td>{{ r.email }}</td><td>{{ r.ip_address }}</td><td>{{ r.channel }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% for e in c.evidence %}
+    <div class="muted">
+      &hellip;{{ e.a.id[-4:] }} &harr; &hellip;{{ e.b.id[-4:] }}:
+      {% for f in e.matched %}<span class="tag">{{ f }}</span>{% endfor %}
+      score {{ e.score }}
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p>No duplicates found.</p>
+  {% endfor %}
+
+  <h2>All records</h2>
+  <table>
+    <tr><th>Id</th><th>Bank</th><th>Name</th><th>ATM used</th><th>Mobile</th><th>Email</th><th>IP</th><th>Channel</th></tr>
+    {% for r in records %}
+    <tr>
+      <td>{{ r.id }}</td><td>{{ r.bank }}</td><td>{{ r.name }}</td><td>{{ r.atm_used }}</td>
+      <td>{{ r.mobile }}</td><td>{{ r.email }}</td><td>{{ r.ip_address }}</td><td>{{ r.channel }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</body>
+</html>
